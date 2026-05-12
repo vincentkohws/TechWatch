@@ -133,29 +133,6 @@ def clear_file(file_name):
     return False
 
 
-# -----------------------------------
-# GLOBAL DELETE / RESET SECTION
-# -----------------------------------
-with st.expander("Danger Zone: Clear Saved Data"):
-    st.warning("Use these buttons only if you want to delete saved records.")
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        if st.button("Clear All Developments"):
-            clear_file(DEVELOPMENTS_FILE)
-            st.success("All developments deleted.")
-
-    with col2:
-        if st.button("Clear All Assessments"):
-            clear_file(ASSESSMENTS_FILE)
-            st.success("All assessments deleted.")
-
-    with col3:
-        if st.button("Clear Everything"):
-            clear_file(DEVELOPMENTS_FILE)
-            clear_file(ASSESSMENTS_FILE)
-            st.success("All saved CSV data deleted.")
 
 
 # -----------------------------------
