@@ -17,13 +17,12 @@ st.set_page_config(
 )
 
 st.title("Naval Defence Tech Watch System")
+st.caption("Repository + Living Assessments + Weekly Brief Generator")
 
 # -----------------------------------
 # OPENAI CLIENT
 # -----------------------------------
-client = OpenAI(
-    api_key=st.secrets["OPENAI_API_KEY"]
-)
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # -----------------------------------
 # FILES
@@ -32,17 +31,11 @@ DEVELOPMENTS_FILE = "developments.csv"
 ASSESSMENTS_FILE = "assessments.csv"
 
 # -----------------------------------
-# HELPERS
+# HELPER FUNCTIONS
 # -----------------------------------
 def read_pdf(file):
     reader = PdfReader(file)
-    text = ""
-
-    for page in reader.pages:
-        text += page.extract_text() or ""
-        text += "\n"
-
-    return text
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
 def read_docx(file):
@@ -55,9 +48,7 @@ def read_txt(file):
 
 
 def read_website(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     response = requests.get(
         url,
@@ -67,18 +58,9 @@ def read_website(url):
 
     response.raise_for_status()
 
-    soup = BeautifulSoup(
-        response.text,
-        "html.parser"
-    )
+    soup = BeautifulSoup(response.text, "html.parser")
 
-    for tag in soup([
-        "script",
-        "style",
-        "nav",
-        "footer",
-        "header"
-    ]):
+    for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
 
     text = soup.get_text(separator="\n")
@@ -106,26 +88,75 @@ def ask_chatgpt(prompt):
     return response.choices[0].message.content
 
 
-def save_csv(file_name, record):
-    df_new = pd.DataFrame([record])
-
-    if os.path.exists(file_name):
-        df_old = pd.read_csv(file_name)
-        df_all = pd.concat(
-            [df_old, df_new],
-            ignore_index=True
-        )
-    else:
-        df_all = df_new
-
-    df_all.to_csv(file_name, index=False)
-
-
 def load_csv(file_name):
     if os.path.exists(file_name):
         return pd.read_csv(file_name)
 
     return pd.DataFrame()
+
+
+def save_csv(file_name, df):
+    df.to_csv(file_name, index=False)
+
+
+def append_record(file_name, record):
+    df_new = pd.DataFrame([record])
+
+    if os.path.exists(file_name):
+        df_old = pd.read_csv(file_name)
+        df_all = pd.concat([df_old, df_new], ignore_index=True)
+    else:
+        df_all = df_new
+
+    save_csv(file_name, df_all)
+
+
+def delete_row(file_name, row_number):
+    df = load_csv(file_name)
+
+    if df.empty:
+        return False
+
+    df = df.drop(row_number)
+    df = df.reset_index(drop=True)
+
+    save_csv(file_name, df)
+
+    return True
+
+
+def clear_file(file_name):
+    if os.path.exists(file_name):
+        os.remove(file_name)
+        return True
+
+    return False
+
+
+# -----------------------------------
+# GLOBAL DELETE / RESET SECTION
+# -----------------------------------
+with st.expander("Danger Zone: Clear Saved Data"):
+    st.warning("Use these buttons only if you want to delete saved records.")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if st.button("Clear All Developments"):
+            clear_file(DEVELOPMENTS_FILE)
+            st.success("All developments deleted.")
+
+    with col2:
+        if st.button("Clear All Assessments"):
+            clear_file(ASSESSMENTS_FILE)
+            st.success("All assessments deleted.")
+
+    with col3:
+        if st.button("Clear Everything"):
+            clear_file(DEVELOPMENTS_FILE)
+            clear_file(ASSESSMENTS_FILE)
+            st.success("All saved CSV data deleted.")
+
 
 # -----------------------------------
 # TABS
@@ -133,15 +164,15 @@ def load_csv(file_name):
 tab1, tab2, tab3, tab4 = st.tabs([
     "Add Development",
     "Repository",
-    "Assessment",
+    "Living Assessment",
     "Weekly Brief"
 ])
 
+
 # ===================================
-# TAB 1
+# TAB 1: ADD DEVELOPMENT
 # ===================================
 with tab1:
-
     st.header("Add Development")
 
     input_type = st.radio(
@@ -156,61 +187,42 @@ with tab1:
     article_text = ""
     source = ""
 
-    # -------------------------------
-    # WEBSITE
-    # -------------------------------
     if input_type == "Website link":
-
-        url = st.text_input(
-            "Paste website link"
-        )
+        url = st.text_input("Paste website link")
 
         if st.button("Read Website"):
+            if not url:
+                st.warning("Please paste a website link first.")
+            else:
+                try:
+                    article_text = read_website(url)
 
-            try:
-                article_text = read_website(url)
+                    st.session_state["article_text"] = article_text
+                    st.session_state["source"] = url
 
-                st.session_state["article_text"] = article_text
-                st.session_state["source"] = url
+                    st.success("Website loaded.")
 
-                st.success("Website loaded.")
+                except Exception as e:
+                    st.error("Could not read website.")
+                    st.exception(e)
 
-            except Exception as e:
-                st.error("Could not read website.")
-                st.exception(e)
+        article_text = st.session_state.get("article_text", "")
+        source = st.session_state.get("source", "")
 
-        article_text = st.session_state.get(
-            "article_text",
-            ""
-        )
-
-        source = st.session_state.get(
-            "source",
-            ""
-        )
-
-    # -------------------------------
-    # DOCUMENT
-    # -------------------------------
     elif input_type == "Upload document":
-
         uploaded_file = st.file_uploader(
             "Upload PDF, DOCX, TXT",
             type=["pdf", "docx", "txt"]
         )
 
         if uploaded_file:
-
             source = uploaded_file.name
 
             try:
-
                 if uploaded_file.name.endswith(".pdf"):
                     article_text = read_pdf(uploaded_file)
-
                 elif uploaded_file.name.endswith(".docx"):
                     article_text = read_docx(uploaded_file)
-
                 else:
                     article_text = read_txt(uploaded_file)
 
@@ -220,11 +232,7 @@ with tab1:
                 st.error("Could not read document.")
                 st.exception(e)
 
-    # -------------------------------
-    # PASTE TEXT
-    # -------------------------------
     else:
-
         article_text = st.text_area(
             "Paste article text",
             height=300
@@ -232,11 +240,7 @@ with tab1:
 
         source = "Manual paste"
 
-    # -------------------------------
-    # PREVIEW
-    # -------------------------------
     if article_text:
-
         st.subheader("Preview")
 
         st.text_area(
@@ -245,11 +249,7 @@ with tab1:
             height=250
         )
 
-        # ---------------------------
-        # ANALYSE
-        # ---------------------------
         if st.button("Analyse and Save"):
-
             prompt = f"""
 You are a naval defence technology watch analyst.
 
@@ -284,57 +284,64 @@ Article:
 """
 
             try:
-
                 output = ask_chatgpt(prompt)
 
                 st.subheader("AI Assessment")
-
                 st.write(output)
 
                 record = {
-                    "timestamp": datetime.now(),
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "source": source,
                     "analysis": output
                 }
 
-                save_csv(
-                    DEVELOPMENTS_FILE,
-                    record
-                )
+                append_record(DEVELOPMENTS_FILE, record)
 
-                st.success(
-                    "Development saved to repository."
-                )
+                st.success("Development saved to repository.")
 
             except Exception as e:
-                st.error(
-                    "OpenAI error. Check credits/API key."
-                )
+                st.error("OpenAI error. Check credits/API key.")
                 st.exception(e)
 
+
 # ===================================
-# TAB 2
+# TAB 2: REPOSITORY
 # ===================================
 with tab2:
-
     st.header("Repository")
 
     df = load_csv(DEVELOPMENTS_FILE)
 
     if df.empty:
-
-        st.info("No developments yet.")
-
+        st.info("No developments saved yet.")
     else:
+        df_display = df.copy()
+        df_display.index.name = "Row Number"
 
         st.dataframe(
-            df,
+            df_display,
             use_container_width=True
         )
 
-        csv = df.to_csv(
-            index=False
-        ).encode("utf-8")
+        st.subheader("Delete One Development")
+
+        delete_index = st.number_input(
+            "Enter development row number to delete",
+            min_value=0,
+            max_value=len(df) - 1,
+            step=1
+        )
+
+        if st.button("Delete Selected Development"):
+            deleted = delete_row(DEVELOPMENTS_FILE, delete_index)
+
+            if deleted:
+                st.success("Selected development deleted.")
+                st.rerun()
+            else:
+                st.error("Could not delete development.")
+
+        csv = df.to_csv(index=False).encode("utf-8")
 
         st.download_button(
             label="Download Repository CSV",
@@ -343,40 +350,34 @@ with tab2:
             mime="text/csv"
         )
 
+
 # ===================================
-# TAB 3
+# TAB 3: LIVING ASSESSMENT
 # ===================================
 with tab3:
-
-    st.header("Assessment")
+    st.header("Living Assessment")
 
     df = load_csv(DEVELOPMENTS_FILE)
 
     if df.empty:
-
-        st.info(
-            "No developments available."
-        )
-
+        st.info("No developments available. Add developments first.")
     else:
-
         topic = st.text_input(
             "Enter topic",
             placeholder="Example: USV mine warfare"
         )
 
         if st.button("Generate Assessment"):
+            if not topic:
+                st.warning("Please enter a topic first.")
+            else:
+                try:
+                    repository_text = df.to_string(index=False)
 
-            try:
-
-                repository_text = df.to_string(
-                    index=False
-                )
-
-                prompt = f"""
+                    prompt = f"""
 You are a naval defence technology analyst.
 
-Generate an assessment using ALL historical repository evidence.
+Generate a living assessment using ALL historical repository evidence.
 
 Topic:
 {topic}
@@ -397,88 +398,90 @@ Repository:
 {repository_text[:20000]}
 """
 
-                assessment = ask_chatgpt(prompt)
+                    assessment = ask_chatgpt(prompt)
 
-                st.subheader(
-                    "Assessment"
-                )
+                    st.subheader("Living Assessment")
+                    st.write(assessment)
 
-                st.write(assessment)
+                    record = {
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "topic": topic,
+                        "assessment": assessment
+                    }
 
-                record = {
-                    "timestamp": datetime.now(),
-                    "topic": topic,
-                    "assessment": assessment
-                }
+                    append_record(ASSESSMENTS_FILE, record)
 
-                save_csv(
-                    ASSESSMENTS_FILE,
-                    record
-                )
+                    st.success("Assessment saved.")
 
-                st.success(
-                    "Assessment saved."
-                )
-
-            except Exception as e:
-                st.error("OpenAI error.")
-                st.exception(e)
+                except Exception as e:
+                    st.error("OpenAI error.")
+                    st.exception(e)
 
     st.divider()
 
     st.subheader("Saved Assessments")
 
-    assessments_df = load_csv(
-        ASSESSMENTS_FILE
-    )
+    assessments_df = load_csv(ASSESSMENTS_FILE)
 
     if assessments_df.empty:
-
-        st.info("No assessments yet.")
-
+        st.info("No assessments saved yet.")
     else:
+        assessments_display = assessments_df.copy()
+        assessments_display.index.name = "Row Number"
 
         st.dataframe(
-            assessments_df,
+            assessments_display,
             use_container_width=True
         )
 
-# ===================================
-# TAB 4
-# ===================================
-with tab4:
+        st.subheader("Delete One Assessment")
 
-    st.header("Weekly Brief")
-
-    developments_df = load_csv(
-        DEVELOPMENTS_FILE
-    )
-
-    assessments_df = load_csv(
-        ASSESSMENTS_FILE
-    )
-
-    if developments_df.empty:
-
-        st.info(
-            "No repository data available."
+        assessment_delete_index = st.number_input(
+            "Enter assessment row number to delete",
+            min_value=0,
+            max_value=len(assessments_df) - 1,
+            step=1
         )
 
+        if st.button("Delete Selected Assessment"):
+            deleted = delete_row(ASSESSMENTS_FILE, assessment_delete_index)
+
+            if deleted:
+                st.success("Selected assessment deleted.")
+                st.rerun()
+            else:
+                st.error("Could not delete assessment.")
+
+        assessments_csv = assessments_df.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Download Assessments CSV",
+            data=assessments_csv,
+            file_name="assessments.csv",
+            mime="text/csv"
+        )
+
+
+# ===================================
+# TAB 4: WEEKLY BRIEF
+# ===================================
+with tab4:
+    st.header("Weekly Brief")
+
+    developments_df = load_csv(DEVELOPMENTS_FILE)
+    assessments_df = load_csv(ASSESSMENTS_FILE)
+
+    if developments_df.empty:
+        st.info("No repository data available.")
     else:
-
-        if st.button(
-            "Generate Weekly Brief"
-        ):
-
+        if st.button("Generate Weekly Brief"):
             try:
+                developments_text = developments_df.to_string(index=False)
 
-                developments_text = developments_df.to_string(
-                    index=False
-                )
-
-                assessments_text = assessments_df.to_string(
-                    index=False
-                )
+                if assessments_df.empty:
+                    assessments_text = "No saved assessments yet."
+                else:
+                    assessments_text = assessments_df.to_string(index=False)
 
                 prompt = f"""
 You are preparing a weekly naval defence technology brief for senior leadership.
@@ -512,10 +515,7 @@ Assessments:
 
                 brief = ask_chatgpt(prompt)
 
-                st.subheader(
-                    "Weekly Brief"
-                )
-
+                st.subheader("Weekly Brief")
                 st.write(brief)
 
                 st.download_button(
