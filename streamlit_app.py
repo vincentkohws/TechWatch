@@ -1,31 +1,51 @@
-import pandas as pd
-from datetime import datetime
-import os
 import streamlit as st
 from openai import OpenAI
 from pypdf import PdfReader
 import docx
 import requests
 from bs4 import BeautifulSoup
+import pandas as pd
+from datetime import datetime
+import os
 
+# -----------------------
+# Page setup
+# -----------------------
 st.set_page_config(page_title="Tech Watch App", layout="wide")
 st.title("Tech Watch App")
+st.caption("Upload an article or paste a website link to generate a tech-watch brief.")
 
+# -----------------------
+# OpenAI setup
+# -----------------------
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
+ARCHIVE_FILE = "techwatch_archive.csv"
+
+# -----------------------
+# Read document functions
+# -----------------------
 def read_pdf(file):
     reader = PdfReader(file)
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
+        text += "\n"
+    return text
+
 
 def read_docx(file):
-    doc = docx.Document(file)
-    return "\n".join(p.text for p in doc.paragraphs)
+    document = docx.Document(file)
+    return "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+
+def read_txt(file):
+    return file.read().decode("utf-8")
+
 
 def read_website(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-    response = requests.get(url, headers=headers, timeout=15)
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(url, headers=headers, timeout=20)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -36,14 +56,17 @@ def read_website(url):
     text = soup.get_text(separator="\n")
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return "\n".join(lines)
-ARCHIVE_FILE = "techwatch_archive.csv"
 
-def save_to_archive(source_type, source, summary):
+
+# -----------------------
+# Archive function
+# -----------------------
+def save_to_archive(source_type, source, output):
     new_entry = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source_type": source_type,
         "source": source,
-        "summary": summary
+        "output": output
     }
 
     df_new = pd.DataFrame([new_entry])
@@ -56,36 +79,73 @@ def save_to_archive(source_type, source, summary):
 
     df_all.to_csv(ARCHIVE_FILE, index=False)
 
+
+# -----------------------
+# Input section
+# -----------------------
 input_mode = st.radio(
     "Choose input type",
-    ["Upload document", "Website link"]
+    ["Upload document", "Website link", "Paste text"]
 )
+
 article_text = ""
+source_type = ""
+source_name = ""
 
 if input_mode == "Upload document":
-    uploaded_file = st.file_uploader("Upload article", type=["txt", "pdf", "docx"])
+    uploaded_file = st.file_uploader(
+        "Upload PDF, DOCX, or TXT",
+        type=["pdf", "docx", "txt"]
+    )
 
-    if uploaded_file:
-        if uploaded_file.name.endswith(".pdf"):
-            article_text = read_pdf(uploaded_file)
-        elif uploaded_file.name.endswith(".docx"):
-            article_text = read_docx(uploaded_file)
-        else:
-            article_text = uploaded_file.read().decode("utf-8")
+    if uploaded_file is not None:
+        source_type = "document"
+        source_name = uploaded_file.name
 
-else:
-    url = st.text_input("Paste website link")
-
-    if st.button("Read Website"):
         try:
-            article_text = read_website(url)
-            st.session_state["article_text"] = article_text
+            if uploaded_file.name.endswith(".pdf"):
+                article_text = read_pdf(uploaded_file)
+            elif uploaded_file.name.endswith(".docx"):
+                article_text = read_docx(uploaded_file)
+            elif uploaded_file.name.endswith(".txt"):
+                article_text = read_txt(uploaded_file)
         except Exception as e:
-            st.error("Cannot read this website. Try another link or copy-paste the article text.")
+            st.error("Could not read this document.")
             st.exception(e)
 
-    article_text = st.session_state.get("article_text", "")
+elif input_mode == "Website link":
+    url = st.text_input("Paste website link here")
 
+    if st.button("Read Website"):
+        if not url:
+            st.warning("Please paste a website link first.")
+        else:
+            try:
+                article_text = read_website(url)
+                st.session_state["article_text"] = article_text
+                st.session_state["source_type"] = "website"
+                st.session_state["source_name"] = url
+                st.success("Website read successfully.")
+            except Exception as e:
+                st.error("Could not read this website. Some websites block automatic reading.")
+                st.exception(e)
+
+    article_text = st.session_state.get("article_text", "")
+    source_type = st.session_state.get("source_type", "")
+    source_name = st.session_state.get("source_name", "")
+
+else:
+    pasted_text = st.text_area("Paste article text here", height=250)
+
+    if pasted_text:
+        article_text = pasted_text
+        source_type = "pasted_text"
+        source_name = "Manual paste"
+
+
+# -----------------------
+# Preview section
+# -----------------------
 if article_text:
     st.subheader("Article Preview")
     st.text_area("Extracted text", article_text[:5000], height=250)
@@ -94,9 +154,10 @@ if article_text:
         prompt = f"""
 You are a naval technology watch analyst.
 
-Analyse the article and produce a structured tech-watch brief.
+Analyse the article below and produce a structured tech-watch brief.
 
-Return the output using these headings:
+Use these headings:
+
 1. Executive Summary
 2. Technology Described
 3. What Is New
@@ -115,24 +176,27 @@ Article:
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}]
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
+
+            output = response.choices[0].message.content
 
             st.subheader("Tech Watch Brief")
             st.write(output)
-            if input_mode == "Website link":
-                save_to_archive(
-                    source_type="website",
-                    source=url,
-                    summary=output[:1000])
 
-        if input_mode == "Upload document":
-    save_to_archive(
-        source_type="document",
-        source=uploaded_file.name,
-        summary=output[:1000]
-    )
+            save_to_archive(source_type, source_name, output)
+            st.success("Saved to archive.")
 
+        except Exception as e:
+            st.error("OpenAI error. Check API key, billing credits, or model access.")
+            st.exception(e)
+
+
+# -----------------------
+# Archive section
+# -----------------------
 st.divider()
 st.header("Archive")
 
@@ -150,6 +214,3 @@ if os.path.exists(ARCHIVE_FILE):
     )
 else:
     st.info("No archived entries yet.")
-        except Exception as e:
-            st.error("OpenAI error. Check API credits, model name, or usage limit.")
-            st.exception(e)
