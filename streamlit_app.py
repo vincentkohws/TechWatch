@@ -8,17 +8,42 @@ import pandas as pd
 from datetime import datetime
 import os
 
-st.set_page_config(page_title="Naval Tech Watch", layout="wide")
+# -----------------------------------
+# PAGE CONFIG
+# -----------------------------------
+st.set_page_config(
+    page_title="Naval Defence Tech Watch",
+    layout="wide"
+)
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+st.title("Naval Defence Tech Watch System")
+st.caption("Repository + Living Assessments + Weekly Brief Generator")
 
+# -----------------------------------
+# OPENAI CLIENT
+# -----------------------------------
+client = OpenAI(
+    api_key=st.secrets["OPENAI_API_KEY"]
+)
+
+# -----------------------------------
+# FILES
+# -----------------------------------
 DEVELOPMENTS_FILE = "developments.csv"
 ASSESSMENTS_FILE = "assessments.csv"
 
-
+# -----------------------------------
+# HELPERS
+# -----------------------------------
 def read_pdf(file):
     reader = PdfReader(file)
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    text = ""
+
+    for page in reader.pages:
+        text += page.extract_text() or ""
+        text += "\n"
+
+    return text
 
 
 def read_docx(file):
@@ -31,157 +56,226 @@ def read_txt(file):
 
 
 def read_website(url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(url, headers=headers, timeout=20)
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
+    response = requests.get(
+        url,
+        headers=headers,
+        timeout=20
+    )
+
     response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser"
+    )
 
-    for tag in soup(["script", "style", "nav", "footer", "header"]):
+    for tag in soup([
+        "script",
+        "style",
+        "nav",
+        "footer",
+        "header"
+    ]):
         tag.decompose()
 
     text = soup.get_text(separator="\n")
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
+
     return "\n".join(lines)
 
 
 def ask_chatgpt(prompt):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}]
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
     )
+
     return response.choices[0].message.content
 
 
-def save_development(record):
+def save_csv(file_name, record):
     df_new = pd.DataFrame([record])
 
-    if os.path.exists(DEVELOPMENTS_FILE):
-        df_old = pd.read_csv(DEVELOPMENTS_FILE)
-        df_all = pd.concat([df_old, df_new], ignore_index=True)
+    if os.path.exists(file_name):
+        df_old = pd.read_csv(file_name)
+        df_all = pd.concat(
+            [df_old, df_new],
+            ignore_index=True
+        )
     else:
         df_all = df_new
 
-    df_all.to_csv(DEVELOPMENTS_FILE, index=False)
+    df_all.to_csv(file_name, index=False)
 
 
-def save_assessment(record):
-    df_new = pd.DataFrame([record])
+def load_csv(file_name):
+    if os.path.exists(file_name):
+        return pd.read_csv(file_name)
 
-    if os.path.exists(ASSESSMENTS_FILE):
-        df_old = pd.read_csv(ASSESSMENTS_FILE)
-        df_all = pd.concat([df_old, df_new], ignore_index=True)
-    else:
-        df_all = df_new
-
-    df_all.to_csv(ASSESSMENTS_FILE, index=False)
-
-
-def load_csv(file):
-    if os.path.exists(file):
-        return pd.read_csv(file)
     return pd.DataFrame()
 
+# -----------------------------------
+# TABS
+# -----------------------------------
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Add Development",
+    "Repository",
+    "Living Assessment",
+    "Weekly Brief"
+])
 
-st.sidebar.title("Navigation")
-page = st.sidebar.radio(
-    "Go to",
-    [
-        "1. Add Development",
-        "2. Repository",
-        "3. Living Assessment",
-        "4. Weekly Brief"
-    ]
-)
+# ===================================
+# TAB 1
+# ===================================
+with tab1:
 
-st.title("Naval Defence Tech Watch System")
-st.caption("Repository + living assessments + weekly brief generator")
-
-
-# -----------------------------
-# PAGE 1: ADD DEVELOPMENT
-# -----------------------------
-if page == "1. Add Development":
-    st.header("Add New Development")
+    st.header("Add Development")
 
     input_type = st.radio(
         "Choose input type",
-        ["Website link", "Upload document", "Paste text"]
+        [
+            "Website link",
+            "Upload document",
+            "Paste text"
+        ]
     )
 
     article_text = ""
     source = ""
 
+    # -------------------------------
+    # WEBSITE
+    # -------------------------------
     if input_type == "Website link":
-        url = st.text_input("Paste article URL")
+
+        url = st.text_input(
+            "Paste website link"
+        )
 
         if st.button("Read Website"):
+
             try:
                 article_text = read_website(url)
-                source = url
+
                 st.session_state["article_text"] = article_text
-                st.session_state["source"] = source
-                st.success("Website read successfully.")
+                st.session_state["source"] = url
+
+                st.success("Website loaded.")
+
             except Exception as e:
-                st.error("Could not read website. Try copy-pasting the text instead.")
+                st.error("Could not read website.")
                 st.exception(e)
 
-        article_text = st.session_state.get("article_text", "")
-        source = st.session_state.get("source", "")
+        article_text = st.session_state.get(
+            "article_text",
+            ""
+        )
 
+        source = st.session_state.get(
+            "source",
+            ""
+        )
+
+    # -------------------------------
+    # DOCUMENT
+    # -------------------------------
     elif input_type == "Upload document":
-        uploaded_file = st.file_uploader("Upload PDF, DOCX, or TXT", type=["pdf", "docx", "txt"])
+
+        uploaded_file = st.file_uploader(
+            "Upload PDF, DOCX, TXT",
+            type=["pdf", "docx", "txt"]
+        )
 
         if uploaded_file:
+
             source = uploaded_file.name
 
             try:
+
                 if uploaded_file.name.endswith(".pdf"):
                     article_text = read_pdf(uploaded_file)
+
                 elif uploaded_file.name.endswith(".docx"):
                     article_text = read_docx(uploaded_file)
+
                 else:
                     article_text = read_txt(uploaded_file)
 
-                st.success("Document read successfully.")
+                st.success("Document loaded.")
+
             except Exception as e:
                 st.error("Could not read document.")
                 st.exception(e)
 
+    # -------------------------------
+    # PASTE TEXT
+    # -------------------------------
     else:
-        article_text = st.text_area("Paste article text here", height=250)
+
+        article_text = st.text_area(
+            "Paste article text",
+            height=300
+        )
+
         source = "Manual paste"
 
+    # -------------------------------
+    # PREVIEW
+    # -------------------------------
     if article_text:
-        st.subheader("Preview")
-        st.text_area("Extracted text", article_text[:5000], height=250)
 
+        st.subheader("Preview")
+
+        st.text_area(
+            "Extracted text",
+            article_text[:5000],
+            height=250
+        )
+
+        # ---------------------------
+        # ANALYSE
+        # ---------------------------
         if st.button("Analyse and Save"):
+
             prompt = f"""
 You are a naval defence technology watch analyst.
 
-Analyse the article below for a naval capability development organisation.
+Analyse this development for a naval capability development organisation.
 
-Return the answer in this exact format:
+Return:
 
 Title:
-Date of development:
+Date:
 Source:
 Main topic:
 Sub-topic:
-Actors / organisations:
+Actors:
 Country:
 Type of development:
 Maturity level:
-Importance score R1-R5:
+Importance score:
 Executive summary:
 What happened:
 Why it matters:
-Naval / defence relevance:
-Relevance to unmanned systems:
-Technology stack layer:
+Naval relevance:
+Unmanned systems relevance:
+Tech stack layer:
 Evidence quality:
-Risks / caveats:
+Risks:
 Impact on existing assessment:
 Open questions:
 Recommended action:
@@ -191,74 +285,102 @@ Article:
 """
 
             try:
+
                 output = ask_chatgpt(prompt)
 
                 st.subheader("AI Assessment")
+
                 st.write(output)
 
                 record = {
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "input_type": input_type,
+                    "timestamp": datetime.now(),
                     "source": source,
                     "analysis": output
                 }
 
-                save_development(record)
-                st.success("Saved into repository.")
+                save_csv(
+                    DEVELOPMENTS_FILE,
+                    record
+                )
+
+                st.success(
+                    "Development saved to repository."
+                )
 
             except Exception as e:
-                st.error("OpenAI error. Check API credits or key.")
+                st.error(
+                    "OpenAI error. Check credits/API key."
+                )
                 st.exception(e)
 
+# ===================================
+# TAB 2
+# ===================================
+with tab2:
 
-# -----------------------------
-# PAGE 2: REPOSITORY
-# -----------------------------
-elif page == "2. Repository":
-    st.header("Repository of Developments")
+    st.header("Repository")
 
     df = load_csv(DEVELOPMENTS_FILE)
 
     if df.empty:
-        st.info("No developments saved yet.")
-    else:
-        st.dataframe(df, use_container_width=True)
 
-        csv = df.to_csv(index=False).encode("utf-8")
+        st.info("No developments yet.")
+
+    else:
+
+        st.dataframe(
+            df,
+            use_container_width=True
+        )
+
+        csv = df.to_csv(
+            index=False
+        ).encode("utf-8")
 
         st.download_button(
-            "Download Repository CSV",
+            label="Download Repository CSV",
             data=csv,
             file_name="developments.csv",
             mime="text/csv"
         )
 
+# ===================================
+# TAB 3
+# ===================================
+with tab3:
 
-# -----------------------------
-# PAGE 3: LIVING ASSESSMENT
-# -----------------------------
-elif page == "3. Living Assessment":
-    st.header("Generate Living Assessment")
+    st.header("Living Assessment")
 
     df = load_csv(DEVELOPMENTS_FILE)
 
     if df.empty:
-        st.info("No repository data yet. Add developments first.")
+
+        st.info(
+            "No developments available."
+        )
+
     else:
-        topic = st.text_input("Enter topic to assess", placeholder="Example: USV mine warfare")
 
-        if st.button("Generate Current Assessment"):
-            relevant_records = df.to_string(index=False)
+        topic = st.text_input(
+            "Enter topic",
+            placeholder="Example: USV mine warfare"
+        )
 
-            prompt = f"""
+        if st.button("Generate Assessment"):
+
+            try:
+
+                repository_text = df.to_string(
+                    index=False
+                )
+
+                prompt = f"""
 You are a naval defence technology analyst.
 
-Using the repository records below, generate a living assessment for this topic:
+Generate a living assessment using ALL historical repository evidence.
 
-Topic: {topic}
-
-The assessment must not only summarise recent items.
-It must explain the current state of play based on all historical evidence.
+Topic:
+{topic}
 
 Use this structure:
 
@@ -266,80 +388,115 @@ Use this structure:
 2. Evidence Base
 3. Maturity Trend
 4. Key Actors
-5. What Has Changed Over Time
+5. What Changed Over Time
 6. Confidence Level
 7. Implications for Our Organisation
 8. Open Questions
-9. Recommended Next Actions
+9. Recommended Actions
 
-Repository records:
-{relevant_records[:20000]}
+Repository:
+{repository_text[:20000]}
 """
 
-            try:
                 assessment = ask_chatgpt(prompt)
 
-                st.subheader("Living Assessment")
+                st.subheader(
+                    "Living Assessment"
+                )
+
                 st.write(assessment)
 
                 record = {
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "timestamp": datetime.now(),
                     "topic": topic,
                     "assessment": assessment
                 }
 
-                save_assessment(record)
-                st.success("Living assessment saved.")
+                save_csv(
+                    ASSESSMENTS_FILE,
+                    record
+                )
+
+                st.success(
+                    "Assessment saved."
+                )
 
             except Exception as e:
                 st.error("OpenAI error.")
                 st.exception(e)
 
     st.divider()
-    st.subheader("Saved Living Assessments")
 
-    assessments_df = load_csv(ASSESSMENTS_FILE)
+    st.subheader("Saved Assessments")
+
+    assessments_df = load_csv(
+        ASSESSMENTS_FILE
+    )
 
     if assessments_df.empty:
-        st.info("No living assessments saved yet.")
+
+        st.info("No assessments yet.")
+
     else:
-        st.dataframe(assessments_df, use_container_width=True)
 
+        st.dataframe(
+            assessments_df,
+            use_container_width=True
+        )
 
-# -----------------------------
-# PAGE 4: WEEKLY BRIEF
-# -----------------------------
-elif page == "4. Weekly Brief":
-    st.header("Generate Weekly Brief")
+# ===================================
+# TAB 4
+# ===================================
+with tab4:
 
-    df = load_csv(DEVELOPMENTS_FILE)
-    assessments_df = load_csv(ASSESSMENTS_FILE)
+    st.header("Weekly Brief")
 
-    if df.empty:
-        st.info("No developments saved yet.")
+    developments_df = load_csv(
+        DEVELOPMENTS_FILE
+    )
+
+    assessments_df = load_csv(
+        ASSESSMENTS_FILE
+    )
+
+    if developments_df.empty:
+
+        st.info(
+            "No repository data available."
+        )
+
     else:
-        if st.button("Generate Weekly Tech Watch Brief"):
-            developments_text = df.to_string(index=False)
-            assessments_text = assessments_df.to_string(index=False) if not assessments_df.empty else "No saved assessments yet."
 
-            prompt = f"""
-You are preparing a weekly naval defence technology watch brief for senior staff.
+        if st.button(
+            "Generate Weekly Brief"
+        ):
 
-Use the repository and living assessments below.
+            try:
 
-The brief must not just list news.
-It must explain:
-- what happened this week
-- what changed in our assessment
-- what the current state of play is
-- what to watch next
+                developments_text = developments_df.to_string(
+                    index=False
+                )
 
-Use this format:
+                assessments_text = assessments_df.to_string(
+                    index=False
+                )
+
+                prompt = f"""
+You are preparing a weekly naval defence technology brief for senior leadership.
+
+The brief must:
+- summarise important developments
+- explain what changed in our assessment
+- explain current state of play
+- identify implications
+- identify open questions
+
+Use this structure:
 
 Title:
 Executive Summary:
 
-1. Key Developments This Week
+1. Key Developments
 2. What Changed in Our Assessment
 3. Current State of Play
 4. Implications for Our Organisation
@@ -347,23 +504,25 @@ Executive Summary:
 6. Recommended Actions
 7. Items to Watch Next Week
 
-Repository:
+Developments:
 {developments_text[:20000]}
 
-Living assessments:
+Assessments:
 {assessments_text[:12000]}
 """
 
-            try:
                 brief = ask_chatgpt(prompt)
 
-                st.subheader("Weekly Brief")
+                st.subheader(
+                    "Weekly Brief"
+                )
+
                 st.write(brief)
 
                 st.download_button(
-                    "Download Weekly Brief",
+                    label="Download Weekly Brief",
                     data=brief,
-                    file_name="weekly_tech_watch_brief.txt",
+                    file_name="weekly_brief.txt",
                     mime="text/plain"
                 )
 
