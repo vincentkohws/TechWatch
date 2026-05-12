@@ -133,7 +133,7 @@ def load_csv(file_name):
 tab1, tab2, tab3, tab4 = st.tabs([
     "Add Development",
     "Repository",
-    "Living Assessment",
+    "Assessment",
     "Weekly Brief"
 ])
 
@@ -348,7 +348,7 @@ with tab2:
 # ===================================
 with tab3:
 
-    st.header("Living Assessment")
+    st.header("Assessment")
 
     df = load_csv(DEVELOPMENTS_FILE)
 
@@ -376,7 +376,7 @@ with tab3:
                 prompt = f"""
 You are a naval defence technology analyst.
 
-Generate a living assessment using ALL historical repository evidence.
+Generate an assessment using ALL historical repository evidence.
 
 Topic:
 {topic}
@@ -400,7 +400,7 @@ Repository:
                 assessment = ask_chatgpt(prompt)
 
                 st.subheader(
-                    "Living Assessment"
+                    "Assessment"
                 )
 
                 st.write(assessment)
