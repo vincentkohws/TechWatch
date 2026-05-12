@@ -126,6 +126,30 @@ Article:
                     source=url,
                     summary=output[:1000])
 
+        if input_mode == "Upload document":
+    save_to_archive(
+        source_type="document",
+        source=uploaded_file.name,
+        summary=output[:1000]
+    )
+
+st.divider()
+st.header("Archive")
+
+if os.path.exists(ARCHIVE_FILE):
+    archive_df = pd.read_csv(ARCHIVE_FILE)
+    st.dataframe(archive_df)
+
+    csv = archive_df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="Download Archive CSV",
+        data=csv,
+        file_name="techwatch_archive.csv",
+        mime="text/csv"
+    )
+else:
+    st.info("No archived entries yet.")
         except Exception as e:
             st.error("OpenAI error. Check API credits, model name, or usage limit.")
             st.exception(e)
