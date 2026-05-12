@@ -2,6 +2,8 @@ import streamlit as st
 from openai import OpenAI
 from pypdf import PdfReader
 import docx
+import requests
+from bs4 import BeautifulSoup
 
 st.set_page_config(page_title="Tech Watch App", layout="wide")
 st.title("Tech Watch App")
@@ -16,18 +18,56 @@ def read_docx(file):
     doc = docx.Document(file)
     return "\n".join(p.text for p in doc.paragraphs)
 
-uploaded_file = st.file_uploader("Upload article", type=["txt", "pdf", "docx"])
+def read_website(url):
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+    response = requests.get(url, headers=headers, timeout=15)
+    response.raise_for_status()
 
-if uploaded_file:
-    if uploaded_file.name.endswith(".pdf"):
-        article_text = read_pdf(uploaded_file)
-    elif uploaded_file.name.endswith(".docx"):
-        article_text = read_docx(uploaded_file)
-    else:
-        article_text = uploaded_file.read().decode("utf-8")
+    soup = BeautifulSoup(response.text, "html.parser")
 
+    for tag in soup(["script", "style", "nav", "footer", "header"]):
+        tag.decompose()
+
+    text = soup.get_text(separator="\n")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return "\n".join(lines)
+
+input_mode = st.radio(
+    "Choose input type",
+    ["Upload document", "Website link"]
+)
+
+article_text = ""
+
+if input_mode == "Upload document":
+    uploaded_file = st.file_uploader("Upload article", type=["txt", "pdf", "docx"])
+
+    if uploaded_file:
+        if uploaded_file.name.endswith(".pdf"):
+            article_text = read_pdf(uploaded_file)
+        elif uploaded_file.name.endswith(".docx"):
+            article_text = read_docx(uploaded_file)
+        else:
+            article_text = uploaded_file.read().decode("utf-8")
+
+else:
+    url = st.text_input("Paste website link")
+
+    if st.button("Read Website"):
+        try:
+            article_text = read_website(url)
+            st.session_state["article_text"] = article_text
+        except Exception as e:
+            st.error("Cannot read this website. Try another link or copy-paste the article text.")
+            st.exception(e)
+
+    article_text = st.session_state.get("article_text", "")
+
+if article_text:
     st.subheader("Article Preview")
-    st.text_area("Extracted text", article_text[:3000], height=250)
+    st.text_area("Extracted text", article_text[:5000], height=250)
 
     if st.button("Generate Tech Watch Brief"):
         prompt = f"""
@@ -48,13 +88,18 @@ Return the output using these headings:
 10. Recommended Action: Watch / Engage / Experiment / Ignore
 
 Article:
-{article_text}
+{article_text[:12000]}
 """
 
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}]
-        )
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}]
+            )
 
-        st.subheader("Tech Watch Brief")
-        st.write(response.choices[0].message.content)
+            st.subheader("Tech Watch Brief")
+            st.write(response.choices[0].message.content)
+
+        except Exception as e:
+            st.error("OpenAI error. Check API credits, model name, or usage limit.")
+            st.exception(e)
