@@ -17,7 +17,6 @@ st.set_page_config(
 )
 
 st.title("Naval Defence Tech Watch System")
-st.caption("Repository + Living Assessments + Weekly Brief Generator")
 
 # -----------------------------------
 # OPENAI CLIENT
