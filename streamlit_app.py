@@ -1,3 +1,6 @@
+import pandas as pd
+from datetime import datetime
+import os
 import streamlit as st
 from openai import OpenAI
 from pypdf import PdfReader
@@ -33,12 +36,30 @@ def read_website(url):
     text = soup.get_text(separator="\n")
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return "\n".join(lines)
+ARCHIVE_FILE = "techwatch_archive.csv"
+
+def save_to_archive(source_type, source, summary):
+    new_entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "source_type": source_type,
+        "source": source,
+        "summary": summary
+    }
+
+    df_new = pd.DataFrame([new_entry])
+
+    if os.path.exists(ARCHIVE_FILE):
+        df_existing = pd.read_csv(ARCHIVE_FILE)
+        df_all = pd.concat([df_existing, df_new], ignore_index=True)
+    else:
+        df_all = df_new
+
+    df_all.to_csv(ARCHIVE_FILE, index=False)
 
 input_mode = st.radio(
     "Choose input type",
     ["Upload document", "Website link"]
 )
-
 article_text = ""
 
 if input_mode == "Upload document":
@@ -98,7 +119,12 @@ Article:
             )
 
             st.subheader("Tech Watch Brief")
-            st.write(response.choices[0].message.content)
+            st.write(output)
+            if input_mode == "Website link":
+                save_to_archive(
+                    source_type="website",
+                    source=url,
+                    summary=output[:1000])
 
         except Exception as e:
             st.error("OpenAI error. Check API credits, model name, or usage limit.")
